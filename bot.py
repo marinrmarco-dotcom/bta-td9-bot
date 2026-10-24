@@ -6,6 +6,11 @@ Uso:
   python bot.py --dry-run    -> revisa y muestra en pantalla, sin enviar ni guardar
   python bot.py --status     -> muestra el estado del cuadro en cada temporalidad
   python bot.py --test       -> envia un mensaje de prueba a Telegram
+  python bot.py --report daily|preopen  -> envia ese reporte de opciones ahora
+
+Cada ejecucion normal ademas: envia el reporte diario (08:30 Chile) y el de
+pre-apertura (15 min antes de Wall Street) cuando corresponde, y avisa las
+operaciones grandes de opciones BTC en Deribit.
 
 Variables de entorno (en GitHub van como Secrets):
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -186,8 +191,43 @@ def load_json(path, default):
 
 def prune(state, days=45):
     cutoff = time.time() - days * 86400
-    state["sent"] = {k: v for k, v in state.get("sent", {}).items() if v >= cutoff}
+    for key in ("sent", "flow_sent"):
+        state[key] = {k: v for k, v in state.get(key, {}).items() if v >= cutoff}
+    state["reports"] = {k: v for k, v in state.get("reports", {}).items() if v >= cutoff}
     return state
+
+
+# --------------------------------------------------------------- opciones ---
+def run_options(cfg, state, args, outgoing):
+    """Reportes programados y alertas de operaciones grandes (Deribit / CBOE)."""
+    import reports  # import aqui: si algo falla en opciones, el TD9 sigue funcionando
+
+    ocfg = cfg.get("options", {})
+    if not ocfg.get("enabled", True):
+        return
+    now = time.time()
+
+    # Reportes forzados a mano (--report daily|preopen)
+    if args.report:
+        fn = reports.daily_report if args.report == "daily" else reports.preopen_report
+        outgoing.append((None, fn(ocfg)))
+        return
+
+    for kind, fn in (("daily", reports.daily_report), ("preopen", reports.preopen_report)):
+        if not ocfg.get(f"{kind}_report", True):
+            continue
+        is_due, key = reports.due(kind, ocfg, state)
+        if is_due:
+            outgoing.append((("reports", key), fn(ocfg)))
+
+    if ocfg.get("btc_unusual_alerts", True):
+        now_ms = int(now * 1000)
+        since = max(state.get("flow_last_ms", 0), now_ms - 60 * 60_000)  # maximo 1 hora atras
+        alerts = reports.unusual_alerts(ocfg, since, now_ms, state.get("flow_sent", {}))
+        for gid, text in alerts[: ocfg.get("max_alerts_per_run", 5)]:
+            outgoing.append((("flow_sent", gid), text))
+        if not args.dry_run:
+            state["flow_last_ms"] = now_ms
 
 
 # ------------------------------------------------------------------- main ---
@@ -196,6 +236,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--test", action="store_true")
+    ap.add_argument("--report", choices=["daily", "preopen"], help="enviar ese reporte ahora")
     args = ap.parse_args()
 
     cfg = load_json(CONFIG_PATH, None)
@@ -214,6 +255,15 @@ def main():
     state = prune(load_json(STATE_PATH, {"sent": {}}))
     now_ms = int(time.time() * 1000)
     outgoing, errors, skipped, checked = [], [], [], 0
+
+    # Opciones (reportes y operaciones grandes). Un error aqui no detiene el TD9.
+    if not args.status:
+        try:
+            run_options(cfg, state, args, outgoing)
+        except Exception as e:
+            errors.append(f"opciones: {e}")
+    if args.report:
+        cfg = dict(cfg, symbols=[])  # solo el reporte pedido
 
     for symbol in cfg["symbols"]:
         cache = {}  # una sola descarga por temporalidad (ahorra consultas)
@@ -270,8 +320,16 @@ def main():
 
     for key, text in outgoing:
         print("-" * 40 + "\n" + text)
-        if not args.dry_run:
+        if args.dry_run:
+            continue
+        try:
             send_telegram(text)
+        except SystemExit as e:
+            errors.append(str(e))
+            continue
+        if isinstance(key, tuple):          # ("reports" | "flow_sent", id)
+            state.setdefault(key[0], {})[key[1]] = time.time()
+        elif key:                           # senal TD9
             state["sent"][key] = time.time()
 
     if not outgoing:
@@ -280,8 +338,8 @@ def main():
         print("Errores:\n  " + "\n  ".join(errors))
     if not args.dry_run:
         STATE_PATH.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
-    if errors and checked == 0:
-        sys.exit(1)  # todo fallo: que GitHub lo marque en rojo
+    if errors and (any("Telegram" in e or "Faltan" in e for e in errors) or (checked == 0 and cfg["symbols"])):
+        sys.exit(1)  # problema con Telegram o todo fallo: que GitHub lo marque en rojo
 
 
 if __name__ == "__main__":

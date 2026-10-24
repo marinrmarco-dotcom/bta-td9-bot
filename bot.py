@@ -309,6 +309,9 @@ def main():
 
     if args.test:
         send_telegram("✅ <b>BTA TD9 Bot conectado.</b>\nTe avisare aqui cuando haya una senal confirmada.")
+        if signals_chat_id():
+            send_telegram("✅ <b>Canal BTA TD9 Señales conectado.</b>\nAqui se publicaran las senales confirmadas.",
+                          signals_chat_id())
         print("Mensaje de prueba enviado.")
         return
 

@@ -40,6 +40,62 @@ TF_LABEL = {"1h": "1H", "2h": "2H", "4h": "4H", "6h": "6H", "8h": "8H", "12h": "
 
 
 # ----------------------------------------------------------------- datos ---
+# Twelve Data: velas reales de XAU/USD (plan gratis: 800 consultas/dia, 8/minuto).
+TWELVE_URL = "https://api.twelvedata.com/time_series"
+TWELVE_INTERVAL = {"1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min", "1h": "1h",
+                   "2h": "2h", "4h": "4h", "1d": "1day", "1w": "1week", "1M": "1month"}
+
+
+class SkipSymbol(Exception):
+    """Simbolo que no se puede revisar ahora (por ejemplo, falta la API key)."""
+
+
+def _next_month_ms(dt):
+    y, m = (dt.year + 1, 1) if dt.month == 12 else (dt.year, dt.month + 1)
+    return int(datetime(y, m, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def fetch_twelve(td_symbol, interval, limit):
+    key = os.environ.get("TWELVEDATA_API_KEY")
+    if not key:
+        raise SkipSymbol("falta el Secret TWELVEDATA_API_KEY")
+    for attempt in range(3):
+        try:
+            r = requests.get(TWELVE_URL, params={
+                "symbol": td_symbol, "interval": TWELVE_INTERVAL[interval], "outputsize": min(limit, 5000),
+                "timezone": "UTC", "order": "asc", "apikey": key}, timeout=20)
+            r.raise_for_status()
+            data = r.json()
+            if data.get("status") != "ok":
+                msg = data.get("message", "respuesta invalida")
+                if data.get("code") == 429 and attempt < 2:  # limite por minuto: esperar y reintentar
+                    time.sleep(62)
+                    continue
+                raise RuntimeError(f"Twelve Data: {msg}")
+            now_ms = int(time.time() * 1000)
+            out = []
+            for v in data["values"]:
+                dt = datetime.fromisoformat(v["datetime"]).replace(tzinfo=timezone.utc)
+                ot = int(dt.timestamp() * 1000)
+                ct = (_next_month_ms(dt) if interval == "1M" else ot + TF_MS[interval]) - 1
+                if ct < now_ms:  # solo velas cerradas
+                    out.append(dict(open_time=ot, close_time=ct, high=float(v["high"]),
+                                    low=float(v["low"]), close=float(v["close"])))
+            return out
+        except requests.RequestException as e:
+            if attempt == 2:
+                raise
+            print(f"  reintento {td_symbol} {interval}: {e}")
+            time.sleep(3)
+
+
+def fetch_symbol(cfg, symbol, interval, limit):
+    src = cfg.get("sources", {}).get(symbol, {})
+    if src.get("provider") == "twelvedata":
+        return fetch_twelve(src.get("symbol", symbol), interval, limit)
+    return fetch_closed(symbol, interval, limit)
+
+
 def fetch_closed(symbol, interval, limit):
     for attempt in range(3):
         try:
@@ -153,16 +209,24 @@ def main():
     notify_nine = cfg.get("notify_nine_formed", False)
     state = prune(load_json(STATE_PATH, {"sent": {}}))
     now_ms = int(time.time() * 1000)
-    outgoing, errors = [], []
+    outgoing, errors, skipped, checked = [], [], [], 0
 
     for symbol in cfg["symbols"]:
-        htf_cache = {}
+        cache = {}  # una sola descarga por temporalidad (ahorra consultas)
+
+        def get(interval):
+            if interval not in cache:
+                cache[interval] = fetch_symbol(cfg, symbol, interval, 500)
+            return cache[interval]
+
         for tf, htf in cfg["timeframes"].items():
             try:
-                candles = fetch_closed(symbol, tf, 500)
-                if htf not in htf_cache:
-                    htf_cache[htf] = fetch_closed(symbol, htf, 300)
-                signals, st = analyze(candles, htf_cache[htf], p)
+                candles = get(tf)
+                signals, st = analyze(candles, get(htf), p)
+                checked += 1
+            except SkipSymbol as e:
+                skipped.append(f"{symbol}: {e}")
+                break
             except Exception as e:  # una temporalidad con error no frena las demas
                 errors.append(f"{symbol} {tf}: {e}")
                 continue
@@ -188,7 +252,11 @@ def main():
                         if key not in state["sent"]:
                             outgoing.append((key, nine_message(symbol, tf, side, st[side], tz)))
 
+    for s in skipped:
+        print(f"Omitido {s}")
     if args.status:
+        if errors:
+            print("Errores:\n  " + "\n  ".join(errors))
         return
 
     for key, text in outgoing:
@@ -203,7 +271,7 @@ def main():
         print("Errores:\n  " + "\n  ".join(errors))
     if not args.dry_run:
         STATE_PATH.write_text(json.dumps(state, indent=1, sort_keys=True), encoding="utf-8")
-    if errors and len(errors) == sum(len(cfg["timeframes"]) for _ in cfg["symbols"]):
+    if errors and checked == 0:
         sys.exit(1)  # todo fallo: que GitHub lo marque en rojo
 
 

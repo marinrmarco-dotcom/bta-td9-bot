@@ -8,7 +8,7 @@ on:
       mode:
         description: "Que hacer"
         type: choice
-        options: [revisar, prueba, estado]
+        options: [revisar, prueba, estado, reporte_diario, preapertura]
         default: revisar
 
 permissions:
@@ -41,6 +41,8 @@ jobs:
           case "${{ github.event.inputs.mode }}" in
             prueba) python bot.py --test ;;
             estado) python bot.py --status ;;
+            reporte_diario) python bot.py --report daily ;;
+            preapertura) python bot.py --report preopen ;;
             *)      python bot.py ;;
           esac
 

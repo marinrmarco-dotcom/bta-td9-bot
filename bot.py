@@ -118,9 +118,9 @@ def fetch_closed(symbol, interval, limit):
 
 
 # -------------------------------------------------------------- telegram ---
-def send_telegram(text):
+def send_telegram(text, chat_id=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         raise SystemExit("Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID")
     r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
@@ -128,6 +128,31 @@ def send_telegram(text):
                             "disable_web_page_preview": True}, timeout=20)
     if not r.ok:
         raise SystemExit(f"Telegram respondio {r.status_code}: {r.text[:300]}")
+
+
+def options_chat_id():
+    """Grupo aparte para opciones (Secret TELEGRAM_CHAT_ID_OPCIONES); si no existe, el chat normal."""
+    return os.environ.get("TELEGRAM_CHAT_ID_OPCIONES") or None
+
+
+def list_chats():
+    """Muestra los chats donde el bot recibio mensajes o fue agregado (para obtener el id de un grupo)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise SystemExit("Falta TELEGRAM_BOT_TOKEN")
+    r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=20)
+    if not r.ok:
+        raise SystemExit(f"Telegram respondio {r.status_code}: {r.text[:300]}")
+    chats = {}
+    for u in r.json().get("result", []):
+        for k in ("message", "my_chat_member", "channel_post", "edited_message"):
+            c = (u.get(k) or {}).get("chat")
+            if c:
+                chats[c["id"]] = (c.get("type"), c.get("title") or c.get("first_name") or "")
+    if not chats:
+        print("No hay chats recientes: escribe un mensaje en el grupo (por ejemplo /start) y vuelve a ejecutar.")
+    for cid, (typ, name) in chats.items():
+        print(f"chat_id {cid} | {typ} | {name}")
 
 
 # ---------------------------------------------------------------- formato ---
@@ -236,6 +261,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--test", action="store_true")
+    ap.add_argument("--chats", action="store_true", help="listar chats/grupos del bot")
     ap.add_argument("--report", choices=["daily", "preopen"], help="enviar ese reporte ahora")
     args = ap.parse_args()
 
@@ -243,6 +269,10 @@ def main():
     if cfg is None:
         raise SystemExit("No se pudo leer config.json")
     tz = cfg.get("timezone_offset_hours", -3)
+
+    if args.chats:
+        list_chats()
+        return
 
     if args.test:
         send_telegram("✅ <b>BTA TD9 Bot conectado.</b>\nTe avisare aqui cuando haya una senal confirmada.")
@@ -322,8 +352,9 @@ def main():
         print("-" * 40 + "\n" + text)
         if args.dry_run:
             continue
+        is_options = key is None or isinstance(key, tuple)
         try:
-            send_telegram(text)
+            send_telegram(text, options_chat_id() if is_options else None)
         except SystemExit as e:
             errors.append(str(e))
             continue

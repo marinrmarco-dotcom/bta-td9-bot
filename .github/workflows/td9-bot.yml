@@ -8,7 +8,7 @@ on:
       mode:
         description: "Que hacer"
         type: choice
-        options: [revisar, prueba, estado, reporte_diario, preapertura]
+        options: [revisar, prueba, estado, reporte_diario, preapertura, grupos]
         default: revisar
 
 permissions:
@@ -36,6 +36,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_OPCIONES: ${{ secrets.TELEGRAM_CHAT_ID_OPCIONES }}
           TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
         run: |
           case "${{ github.event.inputs.mode }}" in
@@ -43,6 +44,7 @@ jobs:
             estado) python bot.py --status ;;
             reporte_diario) python bot.py --report daily ;;
             preapertura) python bot.py --report preopen ;;
+            grupos) python bot.py --chats ;;
             *)      python bot.py ;;
           esac
 

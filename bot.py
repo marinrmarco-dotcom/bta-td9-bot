@@ -130,6 +130,39 @@ def send_telegram(text, chat_id=None):
         raise SystemExit(f"Telegram respondio {r.status_code}: {r.text[:300]}")
 
 
+def signals_chat_id():
+    """Canal de senales TD9 (Secret TELEGRAM_CHAT_ID_SENALES); si no existe, el chat normal."""
+    return os.environ.get("TELEGRAM_CHAT_ID_SENALES") or None
+
+
+DEFAULT_WELCOME = ("✅ <b>BTA TD9 Bot conectado.</b>\n"
+                   "Te avisare aqui cuando haya una senal confirmada.")
+
+
+def answer_starts(cfg, state, dry_run=False):
+    """Responde la bienvenida a quien escribe /start al bot en privado. No guarda datos de nadie:
+    solo recuerda el numero de la ultima actualizacion leida (tg_offset)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token or not cfg.get("welcome_enabled", True):
+        return 0
+    params = {"timeout": 0, "allowed_updates": json.dumps(["message"])}
+    if state.get("tg_offset"):
+        params["offset"] = state["tg_offset"] + 1
+    r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", params=params, timeout=20)
+    if not r.ok:
+        raise RuntimeError(f"getUpdates {r.status_code}: {r.text[:200]}")
+    text = cfg.get("welcome_text") or DEFAULT_WELCOME
+    n = 0
+    for u in r.json().get("result", []):
+        state["tg_offset"] = max(state.get("tg_offset", 0), u["update_id"])
+        m = u.get("message") or {}
+        if m.get("chat", {}).get("type") == "private" and (m.get("text") or "").startswith("/start"):
+            if not dry_run:
+                send_telegram(text, m["chat"]["id"])
+            n += 1
+    return n
+
+
 def options_chat_id():
     """Grupo aparte para opciones (Secret TELEGRAM_CHAT_ID_OPCIONES); si no existe, el chat normal."""
     return os.environ.get("TELEGRAM_CHAT_ID_OPCIONES") or None
@@ -286,6 +319,15 @@ def main():
     now_ms = int(time.time() * 1000)
     outgoing, errors, skipped, checked = [], [], [], 0
 
+    # Bienvenida a quien escribe /start (no detiene nada si falla)
+    if not args.status and not args.report:
+        try:
+            n = answer_starts(cfg, state, args.dry_run)
+            if n:
+                print(f"Bienvenidas enviadas: {n}")
+        except Exception as e:
+            print(f"Bienvenida: {e}")
+
     # Opciones (reportes y operaciones grandes). Un error aqui no detiene el TD9.
     if not args.status:
         try:
@@ -354,7 +396,7 @@ def main():
             continue
         is_options = key is None or isinstance(key, tuple)
         try:
-            send_telegram(text, options_chat_id() if is_options else None)
+            send_telegram(text, options_chat_id() if is_options else signals_chat_id())
         except SystemExit as e:
             errors.append(str(e))
             continue

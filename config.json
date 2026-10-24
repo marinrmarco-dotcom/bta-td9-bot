@@ -23,12 +23,19 @@
     "bb_mult": 2.0
   },
   "max_signal_age_bars": 3,
-  "notify_nine_formed": false,
+  "notify_nine_formed": true,
   "timezone_offset_hours": -3,
   "sources": {
     "XAUUSD": {
       "provider": "twelvedata",
       "symbol": "XAU/USD"
     }
-  }
+  },
+  "nine_timeframes": [
+    "15m",
+    "1h",
+    "4h",
+    "1d",
+    "1w"
+  ]
 }

@@ -35,7 +35,7 @@ TF_MS = {
     "8h": 28_800_000, "12h": 43_200_000, "1d": 86_400_000, "3d": 259_200_000,
     "1w": 604_800_000, "1M": 2_678_400_000,
 }
-TF_LABEL = {"1h": "1H", "2h": "2H", "4h": "4H", "6h": "6H", "8h": "8H", "12h": "12H",
+TF_LABEL = {"15m": "15M", "1h": "1H", "2h": "2H", "4h": "4H", "6h": "6H", "8h": "8H", "12h": "12H",
             "1d": "1D", "3d": "3D", "1w": "1S", "1M": "1M"}
 
 
@@ -136,7 +136,7 @@ def local_time(ms, tz_hours):
 
 
 CHECK_NAMES = {"perf": "9 perfeccionado", "rsi": "RSI extremo", "div": "Divergencia RSI",
-               "bb": "Toque Bollinger", "htf": "TD mayor >= 7", "candle": "Vela de confirmacion"}
+               "bb": "Toque Bollinger", "htf": "TD mayor &gt;= 7", "candle": "Vela de confirmacion"}
 
 
 def signal_message(symbol, tf, htf, sig, tz_hours):
@@ -161,14 +161,18 @@ def signal_message(symbol, tf, htf, sig, tz_hours):
 
 
 def nine_message(symbol, tf, side, st, tz_hours):
-    word = "venta" if side == "venta" else "compra"
-    sign = "<" if side == "venta" else ">"
-    inv_sign = ">" if side == "venta" else "<"
+    word = "VENTA" if side == "venta" else "COMPRA"
+    icon = "🔻" if side == "venta" else "🔺"
+    sign = "&lt;" if side == "venta" else "&gt;"
+    inv_sign = "&gt;" if side == "venta" else "&lt;"
     return (
-        f"🟡 <b>9 de {word} formado · {symbol} {TF_LABEL.get(tf, tf)}</b>\n"
-        f"Esperando vela de confirmacion (cierre {sign} {fmt(st['confirm'])})\n"
+        f"⚠️ <b>ALERTA · Se formó 9 de {word}</b> {icon}\n"
+        f"<b>{symbol} {TF_LABEL.get(tf, tf)}</b> · ¡Estar atento!\n\n"
+        f"Confirma si cierra {sign} {fmt(st['confirm'])}\n"
         f"Invalida si cierra {inv_sign} {fmt(st['invalid'])}\n"
-        f"Confluencias por ahora: {st['score']}/6"
+        f"Confluencias por ahora: {st['score']}/6\n\n"
+        f"Vela 9: {local_time(st['nine_open_time'], tz_hours)} (hora Chile)\n"
+        f"<i>Aún no es señal: espera la confirmación.</i>"
     )
 
 
@@ -244,13 +248,18 @@ def main():
                     continue
                 outgoing.append((key, signal_message(symbol, tf, htf, sig, tz)))
 
-            if notify_nine:
-                last_ct = candles[-1]["close_time"]
-                for side, count in (("venta", st["up"]), ("compra", st["dn"])):
-                    if count == 9 and now_ms - last_ct <= max_age * TF_MS[tf]:
-                        key = f"{symbol}|{tf}|NUEVE-{side}|{last_ct}"
-                        if key not in state["sent"]:
-                            outgoing.append((key, nine_message(symbol, tf, side, st[side], tz)))
+            if notify_nine and tf in cfg.get("nine_timeframes", list(cfg["timeframes"])):
+                # aviso temprano: 9 vigente, sin invalidar ni confirmar todavia
+                for side in ("venta", "compra"):
+                    s = st[side]
+                    if not (s["active"] and s["verdict"] == "Esperando vela" and s["nine_open_time"]):
+                        continue
+                    nine_close = s["nine_open_time"] + TF_MS[tf]
+                    if now_ms - nine_close > max_age * TF_MS[tf]:
+                        continue  # 9 viejo: no avisar
+                    key = f"{symbol}|{tf}|NUEVE-{side}|{s['nine_open_time']}"
+                    if key not in state["sent"]:
+                        outgoing.append((key, nine_message(symbol, tf, side, s, tz)))
 
     for s in skipped:
         print(f"Omitido {s}")

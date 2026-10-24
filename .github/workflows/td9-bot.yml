@@ -36,6 +36,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_SENALES: ${{ secrets.TELEGRAM_CHAT_ID_SENALES }}
           TELEGRAM_CHAT_ID_OPCIONES: ${{ secrets.TELEGRAM_CHAT_ID_OPCIONES }}
           TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
         run: |

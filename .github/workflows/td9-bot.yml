@@ -8,7 +8,7 @@ on:
       mode:
         description: "Que hacer"
         type: choice
-        options: [revisar, prueba, estado, reporte_diario, preapertura, grupos]
+        options: [revisar, prueba, estado, reporte_diario, preapertura, grupos, backtest]
         default: revisar
 
 permissions:
@@ -21,7 +21,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +46,7 @@ jobs:
             reporte_diario) python bot.py --report daily ;;
             preapertura) python bot.py --report preopen ;;
             grupos) python bot.py --chats ;;
+            backtest) python backtest.py ;;
             *)      python bot.py ;;
           esac
 

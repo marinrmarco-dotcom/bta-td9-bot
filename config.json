@@ -2,6 +2,7 @@
   "symbols": [
     "BTCUSDT",
     "ETHUSDT",
+    "XRPUSDT",
     "XAUUSD"
   ],
   "timeframes": {
@@ -51,5 +52,5 @@
     "max_days": 90
   },
   "welcome_enabled": true,
-  "welcome_text": "✅ <b>BTA TD9 Bot conectado.</b>\nLas señales confirmadas de BTC, ETH y XAUUSD se publican en el canal:\n👉 https://t.me/+H1Glukuf-eo4MDgx\n\n<i>Block Trade Academy · No es asesoría financiera.</i>"
+  "welcome_text": "✅ <b>BTA TD9 Bot conectado.</b>\nLas señales confirmadas de BTC, ETH, XRP y XAUUSD se publican en el canal:\n👉 https://t.me/+H1Glukuf-eo4MDgx\n\n<i>Block Trade Academy · No es asesoría financiera.</i>"
 }

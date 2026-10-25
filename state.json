@@ -1,7 +1,9 @@
 {
- "flow_last_ms": 1792926917332,
+ "flow_last_ms": 1792927821724,
  "flow_sent": {},
- "reports": {},
+ "reports": {
+  "daily|2026-10-25": 1792927836.3639112
+ },
  "sent": {
   "BTCUSDT|15m|NUEVE-venta|1792864800000": 1792865720.5175083,
   "BTCUSDT|1h|NUEVE-venta|1792893600000": 1792897241.5495872,

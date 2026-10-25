@@ -25,10 +25,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
+from zoneinfo import ZoneInfo
 
 from td9 import Params, analyze
 
 ROOT = Path(__file__).parent
+NY_TZ = ZoneInfo("America/New_York")
 CONFIG_PATH = ROOT / "config.json"
 STATE_PATH = ROOT / "state.json"
 
@@ -202,23 +204,66 @@ CHECK_NAMES = {"perf": "9 perfeccionado", "rsi": "RSI extremo", "div": "Divergen
                "bb": "Toque Bollinger", "htf": "TD mayor &gt;= 7", "candle": "Vela de confirmacion"}
 
 
-def signal_message(symbol, tf, htf, sig, tz_hours):
+def position_1h(cfg, tf, sig):
+    """Replica la seccion "Posicion 1H" del indicador v2. Devuelve dict con TP o None si no califica."""
+    pc = cfg.get("position_1h", {})
+    if not pc.get("enabled", True):
+        return None
+    if pc.get("only_1h", True) and tf != "1h":
+        return None
+    if pc.get("require_bb", True) and not sig.details.get("bb"):
+        return None
+    if sig.side == "VENTA" and sig.score < pc.get("min_score_sell", 4):
+        return None
+    if sig.side == "VENTA" and not sig.close < sig.invalid_level:
+        return None
+    if sig.side == "COMPRA" and not sig.close > sig.invalid_level:
+        return None
+    h = datetime.fromtimestamp(sig.open_time / 1000, NY_TZ).hour  # hora NY de la vela (como hour(time))
+    sess = pc.get("sessions", {})
+    if h >= 18 or h < 2:
+        ok = sess.get("asia", True)
+    elif h < 7:
+        ok = sess.get("london", True)
+    elif h < 11:
+        ok = sess.get("ny_am", True)
+    elif h < 17:
+        ok = sess.get("ny_pm", False)
+    else:
+        ok = False
+    if not ok:
+        return None
+    d = 1 if sig.side == "COMPRA" else -1
+    rk = abs(sig.close - sig.invalid_level)
+    rs = pc.get("tp_r", [1.0, 2.0, 3.0])
+    return {"r": rs, "tp": [sig.close + d * r * rk for r in rs]}
+
+
+def signal_message(symbol, tf, htf, sig, tz_hours, cfg=None):
     entry, stop = sig.close, sig.invalid_level
     dist = abs(stop - entry)
     target = entry - dist if sig.side == "VENTA" else entry + dist
     risk = dist / entry * 100
     icon = "🔴" if sig.side == "VENTA" else "🟢"
     checks = "\n".join(f"{'✅' if v else '❌'} {CHECK_NAMES[k]}" for k, v in sig.details.items())
+    pos = position_1h(cfg or {}, tf, sig)
+    if pos:
+        head = f"📍 <b>POSICIÓN {sig.side} 1H</b> (filtros de sesión y Bollinger OK)\n"
+        targets = "\n".join(f"TP{i + 1} ({r:g}R): {fmt(t)}" for i, (r, t) in enumerate(zip(pos["r"], pos["tp"])))
+    else:
+        head = ""
+        targets = f"Objetivo 1:1: {fmt(target)}"
     return (
         f"{icon} <b>{sig.side} CONFIRMADA · {symbol} {TF_LABEL.get(tf, tf)}</b>\n"
+        f"{head}"
         f"Confluencias: <b>{sig.score}/6</b>\n\n"
         f"Entrada (cierre): <b>{fmt(entry)}</b>\n"
         f"Stop (invalida): {fmt(stop)}  ·  riesgo {risk:.2f}%\n"
-        f"Objetivo 1:1: {fmt(target)}\n\n"
+        f"{targets}\n\n"
         f"{checks}\n\n"
         f"Vela 9: {local_time(sig.nine_open_time, tz_hours)} · cierre confirmacion: "
         f"{local_time(sig.close_time + 1, tz_hours)} (hora Chile)\n"
-        f"TD mayor: {TF_LABEL.get(htf, htf)} · BTA TD9 Confluencias\n"
+        f"TD mayor: {TF_LABEL.get(htf, htf)} · BTA TD9 Confluencias v2\n"
         f"<i>No es asesoria financiera.</i>"
     )
 
@@ -371,7 +416,7 @@ def main():
                 key = f"{symbol}|{tf}|{sig.side}|{sig.close_time}"
                 if key in state["sent"]:
                     continue
-                outgoing.append((key, signal_message(symbol, tf, htf, sig, tz)))
+                outgoing.append((key, signal_message(symbol, tf, htf, sig, tz, cfg)))
 
             if notify_nine and tf in cfg.get("nine_timeframes", list(cfg["timeframes"])):
                 # aviso temprano: 9 vigente, sin invalidar ni confirmar todavia

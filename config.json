@@ -10,12 +10,12 @@
     "1h": "1w",
     "4h": "1w",
     "1d": "1w",
-    "1w": "1M"
+    "1w": "1w"
   },
   "params": {
     "lookback": 4,
     "window": 4,
-    "min_score": 4,
+    "min_score": 3,
     "rsi_len": 14,
     "rsi_ob": 70,
     "rsi_os": 30,
@@ -52,5 +52,22 @@
     "max_days": 90
   },
   "welcome_enabled": true,
-  "welcome_text": "✅ <b>BTA TD9 Bot conectado.</b>\nLas señales confirmadas de BTC, ETH, XRP y XAUUSD se publican en el canal:\n👉 https://t.me/+H1Glukuf-eo4MDgx\n\n<i>Block Trade Academy · No es asesoría financiera.</i>"
+  "welcome_text": "✅ <b>BTA TD9 Bot conectado.</b>\nLas señales confirmadas de BTC, ETH, XRP y XAUUSD se publican en el canal:\n👉 https://t.me/+H1Glukuf-eo4MDgx\n\n<i>Block Trade Academy · No es asesoría financiera.</i>",
+  "position_1h": {
+    "enabled": true,
+    "only_1h": true,
+    "require_bb": true,
+    "min_score_sell": 4,
+    "sessions": {
+      "asia": true,
+      "london": true,
+      "ny_am": true,
+      "ny_pm": false
+    },
+    "tp_r": [
+      1.0,
+      2.0,
+      3.0
+    ]
+  }
 }

@@ -270,7 +270,7 @@ def signal_message(symbol, tf, htf, sig, tz_hours, cfg=None):
 
 def nine_message(symbol, tf, side, st, tz_hours):
     word = "VENTA" if side == "venta" else "COMPRA"
-    icon = "🔻" if side == "venta" else "🔺"
+    icon = "🔴" if side == "venta" else "🟢"
     sign = "&lt;" if side == "venta" else "&gt;"
     inv_sign = "&gt;" if side == "venta" else "&lt;"
     return (

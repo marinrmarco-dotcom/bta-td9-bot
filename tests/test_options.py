@@ -46,6 +46,20 @@ def test_horarios():
     assert not reports.due("preopen", {}, {}, datetime(2026, 10, 24, 13, 20, tzinfo=timezone.utc))[0]  # sabado
 
 
+def test_compras_gld():
+    def row(sym, vol, oi, last, bid, ask):
+        x = dict(option=sym, volume=vol, open_interest=oi, last_trade_price=last, bid=bid, ask=ask, iv=0.2)
+        _, k, exp, c = od.parse_occ(sym)
+        return (x, k, exp, c)
+    raw = [row("GLD261120C00380000", 4000, 900, 3.20, 3.05, 3.20),   # compra
+           row("GLD261120P00350000", 5000, 800, 2.00, 2.00, 2.15),   # venta
+           row("GLD261120C00400000", 1500, 100, 0.40, 0.35, 0.41)]   # prima chica
+    buys = od.cboe_unusual_buys(raw, now=NOW, min_volume=1000, min_premium=250000)
+    assert len(buys) == 1 and buys[0]["strike"] == 380 and buys[0]["is_call"]
+    assert not reports.gld_market_open(datetime(2026, 10, 25, 15, 30, tzinfo=timezone.utc))  # domingo
+    assert reports.gld_market_open(datetime(2026, 10, 27, 15, 30, tzinfo=timezone.utc))      # martes 11:30 NY
+
+
 if __name__ == "__main__":
-    test_parseo(); test_niveles(); test_flujos_y_agrupacion(); test_horarios()
+    test_parseo(); test_niveles(); test_flujos_y_agrupacion(); test_horarios(); test_compras_gld()
     print("OK: modulo de opciones")

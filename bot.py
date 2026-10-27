@@ -204,6 +204,17 @@ CHECK_NAMES = {"perf": "9 perfeccionado", "rsi": "RSI extremo", "div": "Divergen
                "bb": "Toque Bollinger", "htf": "TD mayor &gt;= 7", "candle": "Vela de confirmacion"}
 
 
+REASON_NAMES = {"perf": "9 perfeccionado", "rsi": "RSI extremo", "div": "divergencia RSI",
+                "bb": "toque de Bollinger", "htf": "TD semanal &gt;= 7", "candle": "vela de confirmacion"}
+
+
+def idea_line(side, desde, hasta, stop, motivo, cond=""):
+    """Linea de idea de entrada. side: 'LONG' o 'SHORT'."""
+    icon = "🟢" if side == "LONG" else "🔴"
+    return (f"💡 {icon} <b>{cond}Sería opción entrar en {side} desde {fmt(desde)} hasta {fmt(hasta)}</b> · "
+            f"stop {fmt(stop)}\nMotivo: {motivo}")
+
+
 def position_1h(cfg, tf, sig):
     """Replica la seccion "Posicion 1H" del indicador v2. Devuelve dict con TP o None si no califica."""
     pc = cfg.get("position_1h", {})
@@ -247,6 +258,12 @@ def signal_message(symbol, tf, htf, sig, tz_hours, cfg=None):
     icon = "🔴" if sig.side == "VENTA" else "🟢"
     checks = "\n".join(f"{'✅' if v else '❌'} {CHECK_NAMES[k]}" for k, v in sig.details.items())
     pos = position_1h(cfg or {}, tf, sig)
+    lado = "SHORT" if sig.side == "VENTA" else "LONG"
+    ok = [REASON_NAMES[k] for k, v in sig.details.items() if v and k != "candle"]
+    rompe = "bajo" if sig.side == "VENTA" else "sobre"
+    motivo = (f"{sig.side.lower()} TD9 confirmada con {sig.score}/6 confluencias"
+              f"{' (' + ', '.join(ok) + ')' if ok else ''}; la vela cerró {rompe} {fmt(sig.confirm_level)}.")
+    idea = idea_line(lado, entry, pos["tp"][0] if pos else target, stop, motivo)
     if pos:
         head = f"📍 <b>POSICIÓN {sig.side} 1H</b> (filtros de sesión y Bollinger OK)\n"
         targets = "\n".join(f"TP{i + 1} ({r:g}R): {fmt(t)}" for i, (r, t) in enumerate(zip(pos["r"], pos["tp"])))
@@ -260,6 +277,7 @@ def signal_message(symbol, tf, htf, sig, tz_hours, cfg=None):
         f"Entrada (cierre): <b>{fmt(entry)}</b>\n"
         f"Stop (invalida): {fmt(stop)}  ·  riesgo {risk:.2f}%\n"
         f"{targets}\n\n"
+        f"{idea}\n\n"
         f"{checks}\n\n"
         f"Vela 9: {local_time(sig.nine_open_time, tz_hours)} · cierre confirmacion: "
         f"{local_time(sig.close_time + 1, tz_hours)} (hora Chile)\n"
@@ -273,12 +291,19 @@ def nine_message(symbol, tf, side, st, tz_hours):
     icon = "🔴" if side == "venta" else "🟢"
     sign = "&lt;" if side == "venta" else "&gt;"
     inv_sign = "&gt;" if side == "venta" else "&lt;"
+    conf, inv = st["confirm"], st["invalid"]
+    hasta = conf - abs(inv - conf) if side == "venta" else conf + abs(inv - conf)  # 1R desde la confirmacion
+    lado = "SHORT" if side == "venta" else "LONG"
+    idea = idea_line(lado, conf, hasta, inv,
+                     f"9 de {word.lower()} formado con {st['score']}/6 confluencias; "
+                     f"falta la vela de confirmación.", cond=f"Si cierra {sign} {fmt(conf)}: ")
     return (
         f"⚠️ <b>ALERTA · Se formó 9 de {word}</b> {icon}\n"
         f"<b>{symbol} {TF_LABEL.get(tf, tf)}</b> · ¡Estar atento!\n\n"
         f"Confirma si cierra {sign} {fmt(st['confirm'])}\n"
         f"Invalida si cierra {inv_sign} {fmt(st['invalid'])}\n"
         f"Confluencias por ahora: {st['score']}/6\n\n"
+        f"{idea}\n\n"
         f"Vela 9: {local_time(st['nine_open_time'], tz_hours)} (hora Chile)\n"
         f"<i>Aún no es señal: espera la confirmación.</i>"
     )
@@ -331,6 +356,13 @@ def run_options(cfg, state, args, outgoing):
             outgoing.append((("flow_sent", gid), text))
         if not args.dry_run:
             state["flow_last_ms"] = now_ms
+
+    if ocfg.get("gld_unusual_alerts", True):
+        try:
+            for gid, text in reports.gld_unusual_alerts(ocfg, state.get("flow_sent", {}))[: ocfg.get("max_alerts_per_run", 5)]:
+                outgoing.append((("flow_sent", gid), text))
+        except Exception as e:  # un problema con CBOE no frena lo demas
+            print(f"GLD inusual: {e}")
 
 
 # ------------------------------------------------------------------- main ---

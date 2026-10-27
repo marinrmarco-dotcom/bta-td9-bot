@@ -96,6 +96,41 @@ def gold_block(cfg):
     return "\n".join(lines)
 
 
+def fmt_px(x):
+    return n2(x) if x < 1000 else n0(x)
+
+
+def idea(side, desde, hasta, stop, motivo):
+    icon = "🟢" if side == "LONG" else "🔴"
+    s = f" · stop {fmt_px(stop)} (1:1)" if stop else ""
+    return (f"💡 {icon} <b>Sería opción entrar en {side} desde {fmt_px(desde)} hasta {fmt_px(hasta)}</b>{s}\n"
+            f"Motivo: {motivo}")
+
+
+def btc_order_idea(g, spot):
+    """Idea para una operacion grande de una sola pata. Estrategias de varias patas: sin idea."""
+    legs = g["legs"]
+    if len({t["instrument_name"] for t in legs}) != 1:
+        return "💡 Estrategia de varias patas: la dirección no es clara, sin idea de entrada."
+    t = legs[0]
+    _, exp, k, cp = t["instrument_name"].split("-")
+    k = float(k)
+    buy, call = t["direction"] == "buy", cp == "C"
+    long_ = (buy and call) or (not buy and not call)
+    side = "LONG" if long_ else "SHORT"
+    accion = ("compra de calls" if buy and call else "compra de puts" if buy else
+              "venta de calls" if call else "venta de puts")
+    cap = spot * (1.03 if long_ else 0.97)  # objetivo maximo 3%
+    if (long_ and k > spot) or (not long_ and k < spot):
+        hasta = min(k, cap) if long_ else max(k, cap)
+    else:
+        hasta = spot * (1.02 if long_ else 0.98)
+    stop = spot - abs(hasta - spot) if long_ else spot + abs(hasta - spot)  # 1:1
+    return idea(side, spot, hasta, stop,
+                f"{accion} grande ({money(g['premium'])}) en strike {n0(k)} vence {exp}: apuesta "
+                f"{'alcista' if long_ else 'bajista'} de un participante grande.")
+
+
 def order_line(g):
     legs = g["legs"]
     if len({t["instrument_name"] for t in legs}) == 1:
@@ -154,9 +189,59 @@ def unusual_alerts(cfg, since_ms, now_ms, already):
         spot = g["legs"][0]["index_price"]
         text = (f"🐋 <b>Operación grande BTC</b> · {ts:%d-%m %H:%M} (Chile)\n"
                 f"{order_line(g)}\n"
-                f"Nocional: {money(g['notional'])} · BTC {n0(spot)}\n"
-                f"<i>COMPRA/VENTA = lado agresor (taker) en Deribit.</i>")
+                f"Nocional: {money(g['notional'])} · BTC {n0(spot)}\n\n"
+                f"{btc_order_idea(g, spot)}\n\n"
+                f"<i>COMPRA/VENTA = lado agresor (taker) en Deribit. No es asesoría financiera.</i>")
         out.append((g["id"], text))
+    return out
+
+
+def gold_idea(r, gld, ratio):
+    xau, kx = gld * ratio, r["strike"] * ratio
+    long_ = r["is_call"]
+    side = "LONG" if long_ else "SHORT"
+    cap = xau * (1.015 if long_ else 0.985)  # objetivo maximo 1,5%
+    if (long_ and kx > xau) or (not long_ and kx < xau):
+        hasta = min(kx, cap) if long_ else max(kx, cap)
+    else:
+        hasta = xau * (1.01 if long_ else 0.99)
+    stop = xau - abs(hasta - xau) if long_ else xau + abs(hasta - xau)  # 1:1
+    return idea(side, xau, hasta, stop,
+                f"compra inusual de {'calls' if long_ else 'puts'} GLD ({money(r['premium'])}, "
+                f"volumen {r['volume'] / max(r['oi'], 1):.1f}x el OI) apuntando a XAU {n0(kx)}.")
+
+
+def gld_market_open(now_utc=None):
+    """Mercado de opciones de EE. UU. abierto (con margen por el retraso de 15 min de CBOE)."""
+    ny = (now_utc or datetime.now(timezone.utc)).astimezone(NY)
+    mins = ny.hour * 60 + ny.minute
+    return ny.weekday() < 5 and 9 * 60 + 45 <= mins <= 16 * 60 + 20
+
+
+def gld_unusual_alerts(cfg, already, now_utc=None):
+    """Devuelve [(id, texto)] de compras inusuales nuevas en opciones de GLD (una vez por contrato y dia)."""
+    if not gld_market_open(now_utc):
+        return []
+    opts, gld, raw, ts = od.cboe_options("GLD")
+    ratio, _ = od.gold_ratio(gld, cfg.get("gld_ratio_fallback", 10.85))
+    day = (now_utc or datetime.now(timezone.utc)).astimezone(NY).strftime("%Y-%m-%d")
+    out = []
+    for r in od.cboe_unusual_buys(raw, min_volume=cfg.get("gld_alert_min_volume", 1000),
+                                  min_premium=cfg.get("gld_alert_min_premium_usd", 250_000)):
+        gid = f"GLD|{r['option']}|{day}"
+        if gid in already:
+            continue
+        tipo = "Call" if r["is_call"] else "Put"
+        lectura = "alcista 🟢 (calls compradas)" if r["is_call"] else "bajista 🔴 (puts compradas)"
+        text = (f"🥇🐋 <b>Compra inusual GLD</b> · {datetime.now(CL):%d-%m %H:%M} (Chile)\n"
+                f"COMPRA {tipo} {n2(r['strike'])} ({_exp(r['expiry'])}) · prima ~<b>{money(r['premium'])}</b>\n"
+                f"Volumen {n0(r['volume'])} vs OI {n0(r['oi'])} ({r['volume'] / max(r['oi'], 1):.1f}x) · IV {r['iv'] * 100:.0f}%\n"
+                f"Último {n2(r['last'])} (bid {n2(r['bid'])} / ask {n2(r['ask'])}) → cerca del ask\n"
+                f"GLD {n2(gld)} ≈ XAU {n0(gld * ratio)} · strike ≈ XAU {n0(r['strike'] * ratio)}\n"
+                f"Lectura: {lectura}\n\n"
+                f"{gold_idea(r, gld, ratio)}\n\n"
+                f"<i>Dirección estimada por precio vs bid/ask. CBOE, 15 min de retraso. No es asesoría financiera.</i>")
+        out.append((gid, text))
     return out
 
 

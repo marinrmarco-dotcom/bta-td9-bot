@@ -49,7 +49,10 @@
     "max_alerts_per_run": 5,
     "gld_ratio_fallback": 10.85,
     "gld_unusual_min_volume": 1000,
-    "max_days": 90
+    "max_days": 90,
+    "gld_unusual_alerts": true,
+    "gld_alert_min_volume": 1000,
+    "gld_alert_min_premium_usd": 250000
   },
   "welcome_enabled": true,
   "welcome_text": "✅ <b>BTA TD9 Bot conectado.</b>\nLas señales confirmadas de BTC, ETH, XRP y XAUUSD se publican en el canal:\n👉 https://t.me/+H1Glukuf-eo4MDgx\n\n<i>Block Trade Academy · No es asesoría financiera.</i>",

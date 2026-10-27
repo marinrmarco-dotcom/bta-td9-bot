@@ -263,6 +263,41 @@ def cboe_unusual_volume(raw, now=None, min_volume=1000, top=5):
     return sorted(rows, key=lambda r: r["premium"], reverse=True)[:top]
 
 
+def trade_side(x):
+    """Estima el lado del ultimo trade comparando su precio con bid/ask (CBOE no informa el agresor).
+    Devuelve "compra", "venta" o None si no se puede saber."""
+    try:
+        last, bid, ask = float(x.get("last_trade_price") or 0), float(x.get("bid") or 0), float(x.get("ask") or 0)
+    except (TypeError, ValueError):
+        return None
+    if last <= 0 or ask <= 0 or ask < bid:
+        return None
+    spread = ask - bid
+    if last >= ask - 0.25 * spread:
+        return "compra"
+    if last <= bid + 0.25 * spread:
+        return "venta"
+    return None
+
+
+def cboe_unusual_buys(raw, now=None, min_volume=1000, min_premium=250_000):
+    """Contratos con volumen > OI, prima grande y ultimo trade cerca del ask (compra probable)."""
+    now = now or datetime.now(timezone.utc)
+    rows = []
+    for x, k, exp, is_call in raw:
+        vol, oi = float(x.get("volume") or 0), float(x.get("open_interest") or 0)
+        if exp <= now or vol < min_volume or vol <= oi:
+            continue
+        px = float(x.get("last_trade_price") or 0)
+        prem = vol * px * 100
+        if prem < min_premium or trade_side(x) != "compra":
+            continue
+        rows.append({"option": x.get("option"), "strike": k, "expiry": exp, "is_call": is_call, "volume": vol,
+                     "oi": oi, "premium": prem, "last": px, "bid": float(x.get("bid") or 0),
+                     "ask": float(x.get("ask") or 0), "iv": float(x.get("iv") or 0)})
+    return sorted(rows, key=lambda r: r["premium"], reverse=True)
+
+
 def gold_ratio(gld_price, fallback):
     """XAUUSD aproximado / GLD usando PAXG (Binance). Si falla, usa el ratio fijo."""
     try:
